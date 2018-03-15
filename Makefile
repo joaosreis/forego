@@ -1,7 +1,7 @@
 BIN = forego
-SRC = $(shell ls *.go)
+SRC = $(shell find . -name '*.go' -not -path './vendor/*')
 
-.PHONY: all build clean install test lint
+.PHONY: all build clean lint release test
 
 all: build
 
@@ -10,15 +10,14 @@ build: $(BIN)
 clean:
 	rm -f $(BIN)
 
-install: forego
-	cp $< ${GOPATH}/bin/
-
 lint: $(SRC)
 	go fmt
 
+release:
+	bin/release
+
 test: lint build
-	go test ./... -cover
-	cd eg && ../forego start
+	go test -v -race -cover ./...
 
 $(BIN): $(SRC)
 	godep go build -o $@

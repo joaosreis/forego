@@ -9,29 +9,73 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
-const shutdownGraceTime = 3 * time.Second
 const defaultPort = 5000
+const defaultShutdownGraceTime = 3
 
 var flagPort int
 var flagConcurrency string
 var flagRestart bool
+var flagShutdownGraceTime int
 var envs envFiles
 
 var cmdStart = &Command{
 	Run:   runStart,
-	Usage: "start [process name] [-f procfile] [-e env] [-c concurrency] [-p port] [-r]",
+	Usage: "start [process name] [-f procfile] [-e env] [-p port] [-c concurrency] [-r] [-t shutdown_grace_time]",
 	Short: "Start the application",
 	Long: `
-Start the application specified by a Procfile (defaults to ./Procfile)
+Start the application specified by a Procfile. The directory containing the
+Procfile is used as the working directory.
+
+The following options are available:
+
+  -f procfile  Set the Procfile. Defaults to './Procfile'.
+
+  -e env       Add an environment file, containing variables in 'KEY=value', or
+               'export KEY=value', form. These variables will be set in the
+               environment of each process. If no environment files are
+               specified, a file called .env is used if it exists.
+
+  -p port      Sets the base port number; each process will have a PORT variable
+               in its environment set to a unique value based on this. This may
+               also be set via a PORT variable in the environment, or in an
+               environment file, and otherwise defaults to 5000.
+
+  -c concurrency
+               Start a specific number of instances of each process. The
+               argument should be in the format 'foo=1,bar=2,baz=0'. Use the
+               name 'all' to set the default number of instances. By default,
+               one instance of each process is started.
+
+  -r           Restart a process which exits. Without this, if a process exits,
+               forego will kill all other processes and exit.
+
+  -t shutdown_grace_time
+               Set the shutdown grace time that each process is given after
+               being asked to stop. Once this grace time expires, the process is
+               forcibly terminated. By default, it is 3 seconds.
+
+If there is a file named .forego in the current directory, it will be read in
+the same way as an environment file, and the values of variables procfile, port,
+concurrency, and shutdown_grace_time used to change the corresponding default
+values.
 
 Examples:
 
+  # start every process
   forego start
+
+  # start only the web process
   forego start web
+
+  # start every process specified in Procfile.test, with the environment specified in .env.test
   forego start -f Procfile.test -e .env.test
+
+  # start every process, with a timeout of 30 seconds
+  forego start -t 30
 `,
 }
 
@@ -41,6 +85,31 @@ func init() {
 	cmdStart.Flag.IntVar(&flagPort, "p", defaultPort, "port")
 	cmdStart.Flag.StringVar(&flagConcurrency, "c", "", "concurrency")
 	cmdStart.Flag.BoolVar(&flagRestart, "r", false, "restart")
+	cmdStart.Flag.IntVar(&flagShutdownGraceTime, "t", defaultShutdownGraceTime, "shutdown grace time")
+	err := readConfigFile(".forego", &flagProcfile, &flagPort, &flagConcurrency, &flagShutdownGraceTime)
+	handleError(err)
+}
+
+func readConfigFile(config_path string, flagProcfile *string, flagPort *int, flagConcurrency *string, flagShutdownGraceTime *int) error {
+	config, err := ReadConfig(config_path)
+
+	if config["procfile"] != "" {
+		*flagProcfile = config["procfile"]
+	} else {
+		*flagProcfile = "Procfile"
+	}
+	if config["port"] != "" {
+		*flagPort, err = strconv.Atoi(config["port"])
+	} else {
+		*flagPort = defaultPort
+	}
+	if config["shutdown_grace_time"] != "" {
+		*flagShutdownGraceTime, err = strconv.Atoi(config["shutdown_grace_time"])
+	} else {
+		*flagShutdownGraceTime = defaultShutdownGraceTime
+	}
+	*flagConcurrency = config["concurrency"]
+	return err
 }
 
 func parseConcurrency(value string) (map[string]int, error) {
@@ -81,15 +150,16 @@ type Forego struct {
 
 func (f *Forego) monitorInterrupt() {
 	handler := make(chan os.Signal, 1)
-	signal.Notify(handler, os.Interrupt)
+	signal.Notify(handler, syscall.SIGALRM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
 	first := true
 
 	for sig := range handler {
 		switch sig {
-		case os.Interrupt:
+		case syscall.SIGINT:
 			fmt.Println("      | ctrl-c detected")
-
+			fallthrough
+		default:
 			f.teardown.Fall()
 			if !first {
 				f.teardownNow.Fall()
@@ -163,17 +233,12 @@ func (f *Forego) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of 
 	go func() {
 		defer f.wg.Done()
 
-		// Prevent goroutine from exiting before process has finished.
-		defer func() { <-finished }()
-		if !flagRestart {
-			defer f.teardown.Fall()
-		}
-
 		select {
 		case <-finished:
 			if flagRestart {
 				f.startProcess(idx, procNum, proc, env, of)
-				return
+			} else {
+				f.teardown.Fall()
 			}
 
 		case <-f.teardown.Barrier():
@@ -221,7 +286,7 @@ func runStart(cmd *Command, args []string) {
 	// When teardown fires, start the grace timer
 	f.teardown.FallHook = func() {
 		go func() {
-			time.Sleep(shutdownGraceTime)
+			time.Sleep(time.Duration(flagShutdownGraceTime) * time.Second)
 			of.SystemOutput("Grace time expired")
 			f.teardownNow.Fall()
 		}()
@@ -237,16 +302,22 @@ func runStart(cmd *Command, args []string) {
 
 	defaultConcurrency := 1
 
+	var all bool
 	for name, num := range concurrency {
 		if name == "all" {
 			defaultConcurrency = num
+			all = true
 		}
 	}
 
 	for idx, proc := range pf.Entries {
 		numProcs := defaultConcurrency
-		if value, ok := concurrency[proc.Name]; ok {
-			numProcs = value
+		if len(concurrency) > 0 {
+			if value, ok := concurrency[proc.Name]; ok {
+				numProcs = value
+			} else if !all {
+				continue
+			}
 		}
 		for i := 0; i < numProcs; i++ {
 			if (singleton == "") || (singleton == proc.Name) {

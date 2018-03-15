@@ -145,3 +145,31 @@ func TestPortFromEnv(t *testing.T) {
 	}
 
 }
+
+func TestConfigBeOverrideByForegoFile(t *testing.T) {
+	var procfile = "Profile"
+	var port = 5000
+	var concurrency string = "web=2"
+	var gracetime int = 3
+	err := readConfigFile("./fixtures/configs/.forego", &procfile, &port, &concurrency, &gracetime)
+
+	if err != nil {
+		t.Fatalf("Cannot set default values from forego config file")
+	}
+
+	if procfile != "Procfile.dev" {
+		t.Fatal("Procfile should be Procfile.dev")
+	}
+
+	if port != 15000 {
+		t.Fatal("port should be 15000, got %d", port)
+	}
+
+	if concurrency != "foo=2,bar=3" {
+		t.Fatal("concurrency should be 'foo=2,bar=3', got %s", concurrency)
+	}
+
+	if gracetime != 30 {
+		t.Fatal("gracetime should be 3, got %d", gracetime)
+	}
+}

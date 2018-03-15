@@ -1,22 +1,14 @@
 ## forego
 
-<a href="https://travis-ci.org/ddollar/forego">
-  <img align="right" src="https://travis-ci.org/ddollar/forego.svg?branch=master">
+<a href="https://circleci.com/gh/ddollar/forego">
+  <img align="right" src="https://circleci.com/gh/ddollar/forego.svg?style=svg">
 </a>
 
-Foreman in Go.
+[Foreman](https://github.com/ddollar/foreman) in Go.
 
 ### Installation
 
-##### OS X (Homebrew)
-
-    brew install forego
-
-##### Precompiled Binaries
-
-* [Linux](https://godist.herokuapp.com/projects/ddollar/forego/releases/current/linux-amd64/forego)
-* [OSX](https://godist.herokuapp.com/projects/ddollar/forego/releases/current/darwin-amd64/forego)
-* [Windows](https://godist.herokuapp.com/projects/ddollar/forego/releases/current/windows-amd64/forego.exe)
+[Downloads](https://dl.equinox.io/ddollar/forego/stable)
 
 ##### Compile from Source
 
@@ -31,6 +23,9 @@ Foreman in Go.
     $ forego start
     web    | listening on port 5000
     worker | listening to queue FOO
+
+Use `forego help` to get a list of available commands, and `forego help
+<command>` for more detailed help on a specific command.
 
 ### License
 

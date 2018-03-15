@@ -3,14 +3,13 @@ package main
 import (
 	"bufio"
 	"fmt"
-	_ "github.com/ddollar/forego/Godeps/_workspace/src/github.com/kr/pretty"
 	"io"
 	"math"
 	"os"
 	"regexp"
 )
 
-var procfileEntryRegexp = regexp.MustCompile("^([A-Za-z0-9_]+):\\s*(.+)$")
+var procfileEntryRegexp = regexp.MustCompile("^([A-Za-z0-9_-]+):\\s*(.+)$")
 
 type ProcfileEntry struct {
 	Name    string
@@ -48,6 +47,9 @@ func (pf *Procfile) LongestProcessName(concurrency map[string]int) (longest int)
 		if c, ok := concurrency[entry.Name]; ok {
 			// Add the number of digits
 			thisLen += int(math.Log10(float64(c))) + 1
+		} else {
+			// The index number after the dot.
+			thisLen += 1
 		}
 		if thisLen > longest {
 			longest = thisLen
